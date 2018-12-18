@@ -27,7 +27,7 @@ MAX_SENTENCE_LEN=30
 TRAIN_DATA_SCHEMA = dataset_schema.from_feature_spec({
     'id': tf.FixedLenFeature(shape=[], dtype=tf.float32),
     'text': tf.FixedLenFeature(shape=[], dtype=tf.string),
-    'labels': tf.FixedLenFeature(shape=[MAX_SENTENCE_LEN], dtype=tf.string),
+    'labels': tf.FixedLenFeature(shape=[MAX_SENTENCE_LEN], dtype=tf.int64),
     'label': tf.FixedLenFeature(shape=[], dtype=tf.string),
     "chars" : tf.FixedLenFeature(shape=[MAX_SENTENCE_LEN,MAX_WORD_LEN], dtype=tf.int64),
     'label_length': tf.FixedLenFeature(shape=[], dtype=tf.int64),
@@ -41,6 +41,11 @@ OUTPUT_FILE_TRAIN="train_records.tfrecords"
 MAPPING = {a:index for index,a in enumerate(ascii_lowercase + ascii_lowercase.upper())}
 UNKONWN = len(MAPPING)
 PADD_VALUE = UNKONWN+1
+
+LABEL_MAPPING = {"B-LOC":0,"I-LOC":1,"B-PER":2,"I-PER":3,
+    "B-ORG":4,"I-ORG":5,"B-MISC":6,"I-MISC":7,"O":8
+    }
+
 # Look here for support and extra guide
 # https://github.com/guillaumegenthial/tf_ner/blob/master/models/chars_lstm_lstm_crf/main.py
 
@@ -163,21 +168,19 @@ class Label_parser(beam.DoFn):
     """Function to parse the labels"""
     def process(self,element):
         ### HERE FIX THE LABELS AND PARSE THEM CORRECTLY TO BREAK IT UP TO LIST
-        label = element["label"]
-        label = label.split(" ")
-        labels=PadList()
-        for value in label:
-            labels.append(value)
-        element["labels"] =labels.inner_pad(MAX_SENTENCE_LEN, "0")
-        # REMAP THE LABELS HERE, THINK IT IS BETTER WITH INT LABELS
+        labels = element["label"]
+        labels = labels.split(" ")
+        labels = [LABEL_MAPPING[label] for label in labels]
+        labels=PadList(labels)
+        element["labels"] =labels.inner_pad(MAX_SENTENCE_LEN, max(LABEL_MAPPING.values()))
+
         label_length = len(element["label"].split())
         sentence_length = len(element["text"].split())
         element["sentence_length"] = sentence_length
         element["label_length"] = label_length
         word_lengths  = PadList([len(word) if len(word)<MAX_WORD_LEN else MAX_WORD_LEN for word in element["text"].split()])
         element["chars_in_word"] = word_lengths.inner_pad(MAX_SENTENCE_LEN,0)
-        print(element)
-        print(element.keys())
+
         return [element]
 
 
@@ -202,8 +205,8 @@ def main(args=None):
         pipeline_options = None
     p = beam.Pipeline(options=pipeline_options)
     with beam_impl.Context(temp_dir="gs://named_entity_recognition/beam/"):
-        filename_data = "gs://named_entity_recognition/data/text.txt"
-        filename_labels = "gs://named_entity_recognition/data/labels.txt"
+        filename_data = "gs://named_entity_recognition/data/text_new.txt"
+        filename_labels = "gs://named_entity_recognition/data/labels_new.txt"
         raw_text = (p | 'Read input data' >> beam.io.ReadFromText(filename_data)
             | 'Set key value data' >> beam.ParDo(Set_Key_Value())
             )

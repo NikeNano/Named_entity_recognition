@@ -1,0 +1,9 @@
+1 Yoann lives in New York
+2 Raph lives in London
+3 Marie lives in Paris
+4 Dominik lives in Berlin
+5 Raul lives in Mexico
+6 Laure lives in Milan
+7 Alexandr lives in Moscow
+8 Ines lives in Casablanca
+9 Clovis lives in San Francisco

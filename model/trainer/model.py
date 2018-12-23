@@ -2,23 +2,30 @@ import os
 import tensorflow as tf
 from tensorflow_transform.tf_metadata import dataset_metadata, metadata_io,dataset_schema 
 from tensorflow_transform.beam.tft_beam_io import transform_fn_io
-from tensorflow.metrics import recall,precision
+from tensorflow.metrics import accuracy
+from trainer.metrics import precision,recall,f1
 
-# CONSTANTS
-BATCH_SIZE=2 # Hyperparamter
-SENTENCE_LEN=30 # Pre processing paramter
-WORD_LEN=10  # Pre processing paramter
-CHAR_SIZE=54  # Number of chars, Pre processing paramter
-EMBED_DIM_CHAR=int(CHAR_SIZE**(1/4))*8 # Hyperparamter
-DEFAULT_WORD_VALUE = 0 # Pre processing paramter
-VOCAB_SIZE=1e4  # Preprocessing paramter
-EMBED_DIM_WORD=int(VOCAB_SIZE**(1/4))*8 # Hyperparamter
-CHAR_HIDDEN_SIZE=10 # Hyperparamter
-HIDDEN_SIZE=20 # Hyperparamter
-NUM_CLASSES=9
+# 4) TRY TO FIND BIGGER DATASET
+# 6) ONLY HAVE 15000 EXAMPLES IS THIS ENOUGH ACTUALLY TO DO THIS GOOD. 
+# 7) GET MORE TRAINIG DATA TO USE FOR THIS EXAMPLES
+# 8) MAKE SURE ALL TEST DATA IS USED DURING PREDICTIONS
 
 
-tf.reset_default_graph()
+
+# # CONSTANTS
+# BATCH_SIZE=100 # Hyperparamter PARAMS
+# SENTENCE_LEN=30 # Pre processing paramter PARAMS
+# WORD_LEN=10  # Pre processing paramter PARAMS
+# CHAR_SIZE=54  # Number of chars, Pre processing paramter PARAMS
+# EMBED_DIM_CHAR=int(CHAR_SIZE**(1/4))*8 # Hyperparamter PARAMS
+# DEFAULT_WORD_VALUE = 0 # Pre processing paramter PARAMS
+# VOCAB_SIZE=1e4  # Preprocessing paramter PARAMS
+# EMBED_DIM_WORD=int(VOCAB_SIZE**(1/4))*8 # Hyperparamter PARAMS
+# CHAR_HIDDEN_SIZE=10 # Hyperparamter PARAMS
+# HIDDEN_SIZE=20 # Hyperparamter PARAMS
+# NUM_CLASSES=9 # PARAMS
+
+
 def transform_metadata(folder="gs://named_entity_recognition/beam/"):
     """Read the transform metadata"""
     transformed_metadata = metadata_io.read_metadata(
@@ -34,8 +41,8 @@ def train_input(train_folder=None,model_dir_beam=None,batch_size=None):
     """Function to generate the tinput data"""
     transformed_feature_spec = transform_metadata()
     dataset = tf.data.experimental.make_batched_features_dataset(
-        file_pattern=os.path.join(train_folder,"TEST*"),
-        batch_size=BATCH_SIZE,
+        file_pattern=os.path.join(train_folder,"TRAIN*"),
+        batch_size=batch_size,
         features=transformed_feature_spec,
         reader=tf.data.TFRecordDataset,
         shuffle=True
@@ -48,9 +55,23 @@ def train_input(train_folder=None,model_dir_beam=None,batch_size=None):
     return transformed_features, transformed_labels
 
 
-def eval_input(input=None):
+
+def eval_input(train_folder=None,model_dir_beam=None,batch_size=None):
+    """Function to generate the tinput data"""
     transformed_feature_spec = transform_metadata()
-    pass
+    dataset = tf.data.experimental.make_batched_features_dataset(
+        file_pattern=os.path.join(train_folder,"TEST*"),
+        batch_size=batch_size,
+        features=transformed_feature_spec,
+        reader=tf.data.TFRecordDataset,
+        shuffle=True
+        )
+    transformed_features = dataset.make_one_shot_iterator().get_next()
+    ## Need to change here later to get all the features
+    transformed_labels = {key: value for (key, value) in transformed_features.items() if key in ["labels"]}
+    transformed_features = {key: value for (key, value) in transformed_features.items() if key not in ["labels"]}
+    
+    return transformed_features, transformed_labels
 
 
 def serve_input(input=None):
@@ -59,7 +80,20 @@ def serve_input(input=None):
 
 def model_fn(features,labels,mode,params):
     """Function to genereate the input data"""
-    # Embedd 
+    # Set up paramters
+    BATCH_SIZE=int(params.batch_size) 
+    SENTENCE_LEN=int(params.sentence_len)
+    WORD_LEN=int(params.word_len)
+    CHAR_SIZE=int(params.char_size)
+    EMBED_DIM_CHAR=int(params.embedd_char_size)
+    DEFAULT_WORD_VALUE = int(params.default_word_value)
+    VOCAB_SIZE=int(params.vocab_size)
+    EMBED_DIM_WORD=int(params.embedd_word_size)
+    CHAR_HIDDEN_SIZE=int(params.char_hidden_size)
+    HIDDEN_SIZE=int(params.hidden_size)
+    NUM_CLASSES=int(params.num_classes)
+    INDICIES = a=list(range(1,9))
+
     input_char = tf.reshape(features["chars"],[BATCH_SIZE,SENTENCE_LEN,WORD_LEN])
     char_embedding = tf.contrib.layers.embed_sequence(
         input_char, vocab_size=CHAR_SIZE, embed_dim=EMBED_DIM_CHAR)
@@ -96,6 +130,12 @@ def model_fn(features,labels,mode,params):
     cell_fw2 = tf.contrib.rnn.LSTMCell(HIDDEN_SIZE)
     cell_bw2 = tf.contrib.rnn.LSTMCell(HIDDEN_SIZE)
     sequence_length= tf.reshape(features['sentence_length'],[BATCH_SIZE])
+    # THESE HOOKS ARE THE THING!!!!!!
+    hook1 =  tf.train.LoggingTensorHook({"sequence_length:": sequence_length},
+                               every_n_iter=1)
+    hook2 =  tf.train.LoggingTensorHook({"word_embedding:": word_embeddings},
+                               every_n_iter=1)                           
+
     (output_fw, output_bw), _ = tf.nn.bidirectional_dynamic_rnn(cell_fw2,
         cell_bw2, word_embeddings, sequence_length=sequence_length,
         dtype=tf.float32,scope="bidirectional_rnn_2")
@@ -131,23 +171,21 @@ def model_fn(features,labels,mode,params):
             logits, labels, sequence_length, crf_params)
         loss = tf.reduce_mean(-log_likelihood)
 
-        # Metrics
-        # AWESOME THIS IS GREAT TO USE THIS MASK HERE
-        # WILL SOLVE A LOT OF PROBLEMS, OTHERWISE
-        # GOOD LEARNING AS WELL
-        #weights = tf.sequence_mask(sequence_length)
+
         weights = tf.sequence_mask(sequence_length,maxlen=SENTENCE_LEN)
-        nbr = tf.constant(NUM_CLASSES)
-        # NEED TO FIX THIS AND UNDERSTAND IT ASWELL
+
         metrics = {
-            'acc': tf.metrics.accuracy(labels, pred_ids, weights),
-            #'precision': precision(labels, pred_ids, nbr, weights),
-            #'recall': recall(labels, pred_ids, NUM_CLASSES, weights),
-            #'f1': f1(labels, pred_ids, NUM_CLASSES, weights),
+            'acc': accuracy(labels, pred_ids, weights),
+            'precision': precision(labels, pred_ids, NUM_CLASSES, INDICIES, weights),
+            'recall': recall(labels, pred_ids, NUM_CLASSES, INDICIES, weights),
+            'f1': f1(labels, pred_ids, NUM_CLASSES, INDICIES, weights),
+            #'mean per class accuracy': mean_per_class_accuracy(labels, pred_ids, weights)
         }
+        hook_pred_ids =  tf.train.LoggingTensorHook({"pred_ids:": pred_ids},
+                               every_n_iter=1)
         # ADD THEM ALL TO THE GRAPH
-        #for metric_name, op in metrics.items():
-        #    tf.summary.scalar(metric_name, op[1])
+        for metric_name, op in metrics.items():
+            tf.summary.scalar(metric_name, op[1])
         
         # WHAT WILL HAPPEN IF WE HAVE EVAL MODE
         if mode == tf.estimator.ModeKeys.EVAL:
@@ -159,7 +197,7 @@ def model_fn(features,labels,mode,params):
             train_op = tf.train.AdamOptimizer().minimize(
                 loss, global_step=tf.train.get_or_create_global_step())
             return tf.estimator.EstimatorSpec(
-                mode, loss=loss, train_op=train_op)
+                mode, loss=loss, train_op=train_op)#,training_hooks=[hook_pred_ids])#,training_hooks=[hook1,hook2])
 
 
 

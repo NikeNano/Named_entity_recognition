@@ -17,9 +17,14 @@ from tensorflow_transform.beam import impl as beam_impl
 from tensorflow_transform.beam.tft_beam_io import transform_fn_io
 from tensorflow_transform.tf_metadata import dataset_metadata, metadata_io,dataset_schema 
 
-DELIMITERS_WORDS= ' '
-MAX_WORD_LEN=30
-MAX_SENTENCE_LEN=54
+DELIMITERS_WORDS=' '
+MAX_WORD_LEN=15
+MAX_SENTENCE_LEN=25
+
+# IT IS EXTREMELY COSTFUL TO HAVE TO LONG WORDS/SENTENCES
+# PAY THE PRICE TWICE IN BOTH THE CHAR EMBEDDINGS AND THE WORD EMBEDDINGS
+# SINSCE I PADD IT IS AWEFULL...... DO STATS ON THE WORD LENGTS
+# DO THIS STATS IN DATAFLOW I GUESSS
 
 TRAIN_DATA_SCHEMA = dataset_schema.from_feature_spec({
     'id': tf.FixedLenFeature(shape=[], dtype=tf.float32),

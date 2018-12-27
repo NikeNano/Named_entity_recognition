@@ -72,15 +72,15 @@ if __name__=="__main__":
 		parser.add_argument(
 		'--batch-size',
 		help='the batch size',
-		default=100)
+		default=500)
 		parser.add_argument(
 		'--sentence-len',
 		help='the max length of a sentence',
-		default=54)
+		default=25)
 		parser.add_argument(
 		'--word-len',
 		help='the max length of a word',
-		default=30)
+		default=15)
 		parser.add_argument(
 		'--char-size',
 		help='number of characters used, based upon settings in preprocessing' ,

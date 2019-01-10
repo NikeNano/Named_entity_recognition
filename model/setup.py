@@ -1,7 +1,7 @@
 from setuptools import find_packages
 from setuptools import setup
 
-REQUIRED_PACKAGES = ['pandas','numpy','sklearn','keras','toolz','dask[complete]','gcsfs','tensorflow-transform', 'tensorflow==1.12']
+REQUIRED_PACKAGES = ['tensorflow-transform']
 
 setup(
     name='trainer',

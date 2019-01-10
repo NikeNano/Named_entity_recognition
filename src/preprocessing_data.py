@@ -22,9 +22,6 @@ MAX_WORD_LEN=15
 MAX_SENTENCE_LEN=25
 
 # IT IS EXTREMELY COSTFUL TO HAVE TO LONG WORDS/SENTENCES
-# PAY THE PRICE TWICE IN BOTH THE CHAR EMBEDDINGS AND THE WORD EMBEDDINGS
-# SINSCE I PADD IT IS AWEFULL...... DO STATS ON THE WORD LENGTS
-# DO THIS STATS IN DATAFLOW I GUESSS
 
 TRAIN_DATA_SCHEMA = dataset_schema.from_feature_spec({
     'id': tf.FixedLenFeature(shape=[], dtype=tf.float32),
@@ -106,7 +103,6 @@ class PadList(list):
             padded_list_length -- how long should the appended list be
             pad_lenght -- how long should the list be e.g how much should we append
             padd_value -- What should the appended list have as values
-            
         """
         nbr_pad = pad_length-len(self)
         if nbr_pad > 0:
@@ -125,7 +121,6 @@ class Set_Key_Value(beam.DoFn):
             element -- the input element
         Returns list with tuple key value pair
         """
-
         key= int(element.split(",")[0])
         value=" ".join(element.split(",")[1:])
         return [(key,value)]
@@ -201,6 +196,31 @@ class Reshape_data(beam.DoFn):
         labels = str(element[1]["labels"][0])#.encode('ascii','ignore'))
         return [{"id":key, "text":text,"label":labels}]
 
+class ReadTextLablesPair(beam.PTransform):
+    def expand(self,pcoll):
+        return (pcoll |  "Merge the labels and the text for the train" >> beam.CoGroupByKey()
+            | "Reshspae the train data " >> beam.ParDo(Reshape_data())
+            | "Encode the train char data" >> beam.ParDo(Char_parser())
+            | "Reshape the train labels " >> beam.ParDo(Label_parser())
+            )
+
+class DataStats(beam.PTransform):
+    def expand(self,pcoll):
+        return (pcoll |"Count the number of example" beam.combiners.CountCombineFn())
+
+    # COMBINERS IS A GOOD THING!
+    # STATEFUL IS A GOOD THING!
+    # METRICS IS A GOOD THING!
+
+    # The goal is to have:
+    # 1) THe number of examples
+    # 2) The number of positive and negative examples
+    # 3) The lenght of the sentences, distribution
+    # 4) The lenght of the words, distributions, grop by word lenght ish :) 
+    # 5) The number of unique words before i encode them 
+
+
+
 
 def main(args=None):
     parser = argparse.ArgumentParser()
@@ -227,15 +247,13 @@ def main(args=None):
             | 'Set key value for train labels' >> beam.ParDo(Set_Key_Value())
             )
         train_data = ({'text': train_text,'labels': train_labels}
-            | "Merge the labels and the text for the train" >> beam.CoGroupByKey()
-            | "Reshspae the train data " >> beam.ParDo(Reshape_data())
-            | "Encode the train char data" >> beam.ParDo(Char_parser())
-            | "Reshape the train labels " >> beam.ParDo(Label_parser())
+            #| "Merge the labels and the text for the train" >> beam.CoGroupByKey()
+            #| "Reshspae the train data " >> beam.ParDo(Reshape_data())
+            #| "Encode the train char data" >> beam.ParDo(Char_parser())
+            #| "Reshape the train labels " >> beam.ParDo(Label_parser())
+             | ReadTextLablesPair()
             )
 
-        # This should be a compsosite function,
-        # Currently the code is duplicated and that is BADDDDDD!!!!!!!!!!!
-        # FIX THIS TRANSFORM
         test_text = (p | 'Read the test input data' >> beam.io.ReadFromText(file_test_data)
             | 'Set key value for test data' >> beam.ParDo(Set_Key_Value())
             )
@@ -243,10 +261,11 @@ def main(args=None):
             | 'Set key value for test labels' >> beam.ParDo(Set_Key_Value())
             )
         test_data = ({'text': test_text,'labels': test_labels}
-            | "Merge the labels and the text for the test" >> beam.CoGroupByKey()
-            | "Reshspae the test datahape " >> beam.ParDo(Reshape_data())
-            | "Encode the test char data" >> beam.ParDo(Char_parser())
-            | "Reshape the test labels " >> beam.ParDo(Label_parser())
+            #| "Merge the labels and the text for the test" >> beam.CoGroupByKey()
+            #| "Reshspae the test datahape " >> beam.ParDo(Reshape_data())
+            #| "Encode the test char data" >> beam.ParDo(Char_parser())
+            #| "Reshape the test labels " >> beam.ParDo(Label_parser())
+             | ReadTextLablesPair()
             )
 
         train_dataset = (train_data, train_metadata)
